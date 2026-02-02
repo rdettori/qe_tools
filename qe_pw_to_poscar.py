@@ -10,6 +10,7 @@ was not updated), the script stops without writing.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -71,6 +72,22 @@ def parse_alat_bohr(lines: List[str]) -> Optional[float]:
         if m:
             return ffloat(m.group(1))
     return None
+
+
+def parse_alat_bohr_from_input(lines: List[str]) -> Optional[float]:
+    for line in lines:
+        m = re.search(r"(?i)celldm\(1\)\s*=\s*([\d.eEdD+-]+)", line)
+        if m:
+            return ffloat(m.group(1))
+        m = re.search(r"(?i)\bA\s*=\s*([\d.eEdD+-]+)", line)
+        if m:
+            angstrom = ffloat(m.group(1))
+            return angstrom / BOHR_TO_ANG
+    return None
+
+
+def parse_cell_parameters_from_input(lines: List[str]) -> List[CellBlock]:
+    return parse_cell_parameters(lines)
 
 
 def parse_cell_parameters(lines: List[str]) -> List[CellBlock]:
@@ -234,10 +251,17 @@ def main() -> int:
         description="Convert last QE pw.out geometry to POSCAR."
     )
     parser.add_argument("pw_out", help="Path to pw.out")
+    parser.add_argument("--in", dest="pw_in", default=None, help="Optional pw.in to read CELL_PARAMETERS.")
     parser.add_argument("-o", "--output", default="POSCAR", help="Output POSCAR path")
     args = parser.parse_args()
 
     lines = read_lines(args.pw_out)
+    pw_in_lines: List[str] = []
+    if args.pw_in:
+        if not os.path.isfile(args.pw_in):
+            print(f"pw.in not found: {args.pw_in}", file=sys.stderr)
+            return 1
+        pw_in_lines = read_lines(args.pw_in)
     calc = guess_calculation(lines)
     steps = count_relax_steps(lines)
     positions_blocks = parse_atomic_positions(lines)
@@ -257,18 +281,24 @@ def main() -> int:
     last_positions = positions_blocks[-1]
     cell_blocks = parse_cell_parameters(lines)
     alat_bohr = parse_alat_bohr(lines)
+    if alat_bohr is None and pw_in_lines:
+        alat_bohr = parse_alat_bohr_from_input(pw_in_lines)
 
     if cell_blocks:
         cell_ang = convert_cell_to_angstrom(cell_blocks[-1], alat_bohr)
     else:
-        axes = parse_crystal_axes(lines)
-        if axes is None:
-            print("No CELL_PARAMETERS or crystal axes found for lattice vectors.", file=sys.stderr)
-            return 1
-        if alat_bohr is None:
-            print("Missing lattice parameter (alat) for crystal axes conversion.", file=sys.stderr)
-            return 1
-        cell_ang = [[v * alat_bohr * BOHR_TO_ANG for v in row] for row in axes]
+        input_cell_blocks = parse_cell_parameters_from_input(pw_in_lines) if pw_in_lines else []
+        if input_cell_blocks:
+            cell_ang = convert_cell_to_angstrom(input_cell_blocks[-1], alat_bohr)
+        else:
+            axes = parse_crystal_axes(lines)
+            if axes is None:
+                print("No CELL_PARAMETERS or crystal axes found for lattice vectors.", file=sys.stderr)
+                return 1
+            if alat_bohr is None:
+                print("Missing lattice parameter (alat) for crystal axes conversion.", file=sys.stderr)
+                return 1
+            cell_ang = [[v * alat_bohr * BOHR_TO_ANG for v in row] for row in axes]
 
     coord_type, positions = convert_positions(last_positions, alat_bohr)
 
