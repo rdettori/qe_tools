@@ -52,17 +52,17 @@ def guess_calculation(lines: List[str]) -> Optional[str]:
     return None
 
 
-def find_relax_steps(lines: List[str]) -> Optional[int]:
-    patterns = [
-        r"(?i)number of bfgs steps\s*=\s*(\d+)",
-        r"(?i)number of ionic steps\s*=\s*(\d+)",
-    ]
+def count_relax_steps(lines: List[str]) -> int:
+    """
+    Count completed ionic steps by tracking SCF convergence markers.
+    QE prints 'convergence has been achieved in' at the end of each SCF cycle,
+    and in relax/vc-relax this corresponds to the end of an ionic step.
+    """
+    count = 0
     for line in lines:
-        for pat in patterns:
-            m = re.search(pat, line)
-            if m:
-                return int(m.group(1))
-    return None
+        if re.search(r"(?i)\bconvergence has been achieved in\b", line):
+            count += 1
+    return count
 
 
 def parse_alat_bohr(lines: List[str]) -> Optional[float]:
@@ -239,7 +239,7 @@ def main() -> int:
 
     lines = read_lines(args.pw_out)
     calc = guess_calculation(lines)
-    steps = find_relax_steps(lines)
+    steps = count_relax_steps(lines)
     positions_blocks = parse_atomic_positions(lines)
 
     if steps == 0:
