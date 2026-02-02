@@ -95,7 +95,11 @@ def parse_cell_parameters(lines: List[str]) -> List[CellBlock]:
     for i, line in enumerate(lines):
         if "CELL_PARAMETERS" in line:
             m = re.search(r"CELL_PARAMETERS\s*\(([^)]+)\)", line)
-            units = m.group(1).strip() if m else "alat"
+            if m:
+                units = m.group(1).strip()
+            else:
+                parts = line.split()
+                units = parts[1].strip() if len(parts) > 1 else "alat"
             vectors: List[List[float]] = []
             for j in range(i + 1, min(i + 4, len(lines))):
                 parts = lines[j].split()
