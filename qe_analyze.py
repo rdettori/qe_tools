@@ -391,8 +391,8 @@ def format_report(res: QEAnalysis) -> str:
         lines.append("")
         lines.append("Last force block:")
         lines.append(
-            f"  total force = {res.last_force.total_force_ry_bohr:.6e} Ry/bohr"
-            f"  = {res.last_force.total_force_ev_ang:.6e} eV/Å"
+            f"  total force = {res.last_force.total_force_ry_bohr:.2e} Ry/bohr"
+            f"  = {res.last_force.total_force_ev_ang:.2e} eV/Å"
         )
     else:
         lines.append("")
@@ -400,8 +400,8 @@ def format_report(res: QEAnalysis) -> str:
 
     lines.append("")
     lines.append("SCF convergence summary:")
-    lines.append(f"  'convergence has been achieved' count: {res.scf_converged_count}")
-    lines.append(f"  non-converged SCF indicators count:     {res.scf_not_converged_count}")
+    lines.append(f"  completed SCF cycles: {res.scf_converged_count}")
+    lines.append(f"  non-converged SCF cycles: {res.scf_not_converged_count}")
     if res.scf_not_converged_examples:
         lines.append("  examples:")
         for ex in res.scf_not_converged_examples:
@@ -425,12 +425,6 @@ def format_report(res: QEAnalysis) -> str:
         if len(res.warnings) > 25:
             lines.append(f"  ... ({len(res.warnings) - 25} more)")
 
-    # A simple "overall" status (best-effort)
-    lines.append("")
-    overall_ok = res.job_done and not res.errors and res.scf_not_converged_count == 0
-    if (res.calculation or "").lower() in ("relax", "vc-relax") and res.geometry_converged is False:
-        overall_ok = False
-    lines.append(f"Overall status (best-effort): {'OK' if overall_ok else 'CHECK'}")
     return "\n".join(lines)
 
 
