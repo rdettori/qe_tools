@@ -7,7 +7,7 @@ Analyze Quantum ESPRESSO pw.x output (pw.out) and optionally pw.in.
 Checks:
 - whether the run finished ("JOB DONE") and whether relax/vc-relax converged
 - number of ionic/relaxation steps (estimated from "Forces acting on atoms" blocks)
-- max atomic force in the LAST force block
+- total force (after "Total force =") in the LAST force block
 - presence of non-converged SCF cycles
 - other errors/fatal messages
 
@@ -108,9 +108,8 @@ def guess_calculation_from_out(out_text: str) -> Optional[str]:
 
 @dataclass
 class ForceSummary:
-    max_force_ry_bohr: Optional[float] = None
-    max_force_ev_ang: Optional[float] = None
-    max_force_atom_index_1based: Optional[int] = None
+    total_force_ry_bohr: Optional[float] = None
+    total_force_ev_ang: Optional[float] = None
 
 
 @dataclass
@@ -209,7 +208,7 @@ _FORCE_LINE_RE = re.compile(
 
 def parse_last_force_block(lines: List[str]) -> ForceSummary:
     """
-    Parse the LAST 'Forces acting on atoms' block and return max |F| among atoms.
+    Parse the LAST 'Forces acting on atoms' block and return the total force.
     Assumes forces are in Ry/bohr (QE prints Ry/au, i.e., Ry/bohr).
     """
     indices = find_force_block_indices(lines)
@@ -217,42 +216,33 @@ def parse_last_force_block(lines: List[str]) -> ForceSummary:
         return ForceSummary()
 
     start = indices[-1]
-    # Force lines usually follow shortly; scan forward a reasonable window
-    max_norm = None
-    max_atom = None
+    total_force = None
 
     # Scan until blank line streak or until we hit a clearly different section.
     for j in range(start + 1, min(start + 5000, len(lines))):
         line = lines[j].rstrip("\n")
-        m = _FORCE_LINE_RE.match(line)
-        if m:
-            atom = int(m.group(1))
-            fx = ffloat(m.group(2))
-            fy = ffloat(m.group(3))
-            fz = ffloat(m.group(4))
-            norm = (fx * fx + fy * fy + fz * fz) ** 0.5
-            if (max_norm is None) or (norm > max_norm):
-                max_norm = norm
-                max_atom = atom
-            continue
+        if "Total force" in line:
+            m = re.search(r"(?i)Total force\s*=\s*([-\d.eEdD+]+)", line)
+            if m:
+                total_force = ffloat(m.group(1))
+                break
 
         # Stop conditions: once we've started parsing forces, a non-force line after
-        # seeing at least one force and then a blank or "total force" or next header.
-        if max_norm is not None:
+        # seeing at least one force and then a blank or next header.
+        if _FORCE_LINE_RE.match(line):
+            continue
+        if total_force is not None:
             if line.strip() == "":
-                break
-            if "Total force" in line:
                 break
             if "Entering Dynamics" in line or "Self-consistent Calculation" in line:
                 break
 
-    if max_norm is None:
+    if total_force is None:
         return ForceSummary()
 
     return ForceSummary(
-        max_force_ry_bohr=max_norm,
-        max_force_ev_ang=max_norm * RY_PER_BOHR_TO_EV_PER_ANG,
-        max_force_atom_index_1based=max_atom,
+        total_force_ry_bohr=total_force,
+        total_force_ev_ang=total_force * RY_PER_BOHR_TO_EV_PER_ANG,
     )
 
 
@@ -397,18 +387,16 @@ def format_report(res: QEAnalysis) -> str:
 
     lines.append(f"Ionic/relaxation steps (estimate): {res.ionic_steps_estimate}")
 
-    if res.last_force.max_force_ry_bohr is not None:
+    if res.last_force.total_force_ry_bohr is not None:
         lines.append("")
         lines.append("Last force block:")
         lines.append(
-            f"  max |F| = {res.last_force.max_force_ry_bohr:.6e} Ry/bohr"
-            f"  = {res.last_force.max_force_ev_ang:.6e} eV/Å"
+            f"  total force = {res.last_force.total_force_ry_bohr:.6e} Ry/bohr"
+            f"  = {res.last_force.total_force_ev_ang:.6e} eV/Å"
         )
-        if res.last_force.max_force_atom_index_1based is not None:
-            lines.append(f"  atom index (1-based): {res.last_force.max_force_atom_index_1based}")
     else:
         lines.append("")
-        lines.append("Last force block: not found (tprnfor may be off, or no forces printed).")
+        lines.append("Last force block: total force not found (tprnfor may be off, or no forces printed).")
 
     lines.append("")
     lines.append("SCF convergence summary:")
